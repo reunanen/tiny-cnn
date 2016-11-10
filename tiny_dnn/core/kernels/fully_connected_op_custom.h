@@ -38,21 +38,40 @@ fully_connected_op_custom(const tensor_t&     in_data,
                           tensor_t&           out_data,
                           const fully_params& params,
                           const bool          layer_parallelize) {
-    for_i(layer_parallelize, in_data.size(), [&](int sample) {
-        const vec_t& in = in_data[sample];
-        vec_t& out = out_data[sample];
 
-        for (cnn_size_t i = 0; i < params.out_size_; i++) {
-            out[i] = float_t(0);
-            for (cnn_size_t c = 0; c < params.in_size_; c++) {
-                out[i] += W[c * params.out_size_ + i] * in[c];
-            }
-
-            if (params.has_bias_) {
-                out[i] += bias[i];
-            }
+    const auto op = [&](const vec_t& in, vec_t out, cnn_size_t i) {
+        out[i] = float_t(0);
+        for (cnn_size_t c = 0; c < params.in_size_; c++) {
+            out[i] += W[c * params.out_size_ + i] * in[c];
         }
-    });
+
+        if (params.has_bias_) {
+            out[i] += bias[i];
+        }
+    };
+
+    const auto in_data_size = in_data.size();
+
+    if (in_data_size != 1) {
+        // parallelize across samples
+        for_i(layer_parallelize, in_data.size(), [&](int sample) {
+            const vec_t& in = in_data[sample];
+            vec_t& out = out_data[sample];
+
+            for (cnn_size_t i = 0; i < params.out_size_; i++) {
+                op(in, out, i);
+            }
+        });
+    }
+    else {
+        // parallelize across params
+        const vec_t& in = in_data[0];
+        vec_t& out = out_data[0];
+
+        for_i(layer_parallelize, params.out_size_, [&](cnn_size_t i) {
+            op(in, out, i);
+        });
+    }
 }
 
 inline void
